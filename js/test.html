@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <!--The viewport meta tag is used to improve the presentation and behavior of the samples
+      on iOS devices-->
+    <meta
+      name="viewport"
+      content="initial-scale=1, maximum-scale=1,user-scalable=no"
+    />
+    <title>Create Map and add a dynamic layer</title>
+    <link
+      rel="stylesheet"
+      href="https://js.arcgis.com/3.22/esri/css/esri.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://js.arcgis.com/3.22/dijit/themes/claro/claro.css"
+    />
+    <style>
+      html,
+      body,
+      #mapDiv {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+      }
+    </style>
+    <script src="http://js.arcgis.com/3.22/"></script>
+    <script>
+      var map, portalItem;
+
+      require([
+        "esri/map",
+        "esri/layers/ArcGISDynamicMapServiceLayer",
+        "esri/layers/ArcGISTiledMapServiceLayer",
+        "esri/layers/ImageParameters",
+        "esri/geometry/Extent",
+        "esri/request",
+        "esri/arcgis/utils",
+        "dojo/Deferred",
+        "dojo/_base/array",
+        "dojo/_base/lang",
+        "esri/layers/DynamicLayerInfo",
+        "esri/layers/LayerDrawingOptions",
+      ], function (
+        Map,
+        ArcGISDynamicMapServiceLayer,
+        ArcGISTiledMapServiceLayer,
+        ImageParameters,
+        Extent,
+        esriRequest,
+        arcgisUtils,
+        Deferred,
+        array,
+        lang,
+        DynamicLayerInfo,
+        LayerDrawingOptions
+      ) {
+        map = new Map("mapDiv", {
+          basemap: "topo",
+          center: [-122.45, 37.75],
+          zoom: 3,
+        });
+
+        var portalItemStr = "4b3e17633560425fa1f68a64ab1b573d";
+        arcgisUtils.getItem(portalItemStr).then(function (result) {
+          portalItem = result;
+          newMapServiceLayer(portalItem.itemData).then(function (lyr) {
+            map.addLayer(lyr);
+          });
+        });
+
+        function newMapServiceLayer(itemData) {
+          var self = this,
+            dfd = new Deferred();
+          var checkVisibleLayers = false;
+          var serviceUrl = portalItem.item.url;
+          var content = {
+            f: "json",
+          };
+          esriRequest(
+            {
+              url: serviceUrl,
+              content: content,
+              handleAs: "json",
+              callbackParamName: "callback",
+            },
+            {}
+          ).then(
+            function (response) {
+              var lyr = null;
+              var options = {
+                id: "2017 USA Average Household Income",
+              };
+              if (response.tileInfo) {
+                lyr = new ArcGISTiledMapServiceLayer(serviceUrl, options);
+              } else {
+                if (
+                  response &&
+                  response.supportedImageFormatTypes &&
+                  response.supportedImageFormatTypes.indexOf("PNG32") !== -1
+                ) {
+                  options.imageParameters = new ImageParameters();
+                  options.imageParameters.format = "png32";
+                }
+                lyr = new ArcGISDynamicMapServiceLayer(serviceUrl, options);
+
+                if (itemData && itemData.layers && itemData.layers.length > 0) {
+                  var expressions = [];
+                  var dynamicLayerInfo;
+                  var dynamicLayerInfos = [];
+                  var drawingOptions;
+                  var drawingOptionsArray = [];
+                  var source;
+                  array.forEach(itemData.layers, function (layerInfo) {
+                    if (
+                      layerInfo.layerDefinition &&
+                      layerInfo.layerDefinition.definitionExpression
+                    ) {
+                      expressions[layerInfo.id] =
+                        layerInfo.layerDefinition.definitionExpression;
+                    }
+                    if (
+                      layerInfo.layerDefinition &&
+                      layerInfo.layerDefinition.source
+                    ) {
+                      dynamicLayerInfo = null;
+                      source = layerInfo.layerDefinition.source;
+                      if (source.type === "mapLayer") {
+                        var metaLayerInfos = array.filter(
+                          response.layers,
+                          function (rlyr) {
+                            return rlyr.id === source.mapLayerId;
+                          }
+                        );
+                        if (metaLayerInfos.length) {
+                          dynamicLayerInfo = lang.mixin(
+                            metaLayerInfos[0],
+                            layerInfo
+                          );
+                        }
+                      } else {
+                        dynamicLayerInfo = lang.mixin({}, layerInfo);
+                      }
+                      if (dynamicLayerInfo) {
+                        dynamicLayerInfo.source = source;
+                        delete dynamicLayerInfo.popupInfo;
+                        dynamicLayerInfo = new DynamicLayerInfo(
+                          dynamicLayerInfo
+                        );
+                        if (itemData.visibleLayers) {
+                          var vis =
+                            typeof itemData.visibleLayers === "string"
+                              ? itemData.visibleLayers.split(",")
+                              : itemData.visibleLayers;
+                          if (array.indexOf(vis, layerInfo.id) > -1) {
+                            dynamicLayerInfo.defaultVisibility = true;
+                          } else {
+                            dynamicLayerInfo.defaultVisibility = false;
+                          }
+                        }
+                        dynamicLayerInfos.push(dynamicLayerInfo);
+                      }
+                    }
+                    if (
+                      layerInfo.layerDefinition &&
+                      layerInfo.layerDefinition.source &&
+                      layerInfo.layerDefinition.drawingInfo
+                    ) {
+                      drawingOptions = new LayerDrawingOptions(
+                        layerInfo.layerDefinition.drawingInfo
+                      );
+                      drawingOptionsArray[layerInfo.id] = drawingOptions;
+                    }
+                  });
+
+                  if (expressions.length > 0) {
+                    lyr.setLayerDefinitions(expressions);
+                  }
+                  if (dynamicLayerInfos.length > 0) {
+                    lyr.setDynamicLayerInfos(dynamicLayerInfos, true);
+                    if (drawingOptionsArray.length > 0) {
+                      lyr.setLayerDrawingOptions(drawingOptionsArray, true);
+                    }
+                  } else {
+                    checkVisibleLayers = true;
+                  }
+                }
+              }
+              dfd.resolve(lyr);
+            },
+            function (error) {
+              dfd.reject(error);
+            }
+          );
+          return dfd;
+        }
+      });
+    </script>
+  </head>
+  <body class="claro">
+    <div id="mapDiv"></div>
+  </body>
+</html>
