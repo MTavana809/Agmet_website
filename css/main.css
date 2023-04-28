@@ -1,0 +1,17 @@
+body {
+    background-color: rgba(224, 235, 233, 0.826);
+    color: rgb(91, 94, 66);
+  }
+  em {
+    color: red;
+    font-size: large;
+    font-style: normal;
+  }
+  img {
+    width: 1300px;
+    height: 800px;
+    object-fit: cover;
+  }
+  a.search {
+    position: relative;
+  }
